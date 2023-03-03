@@ -1,0 +1,193 @@
+
+Analysis of solutions to a programming exercise found at
+
+   http://community.schemewiki.org/?sicp-ex-3.26
+
+; Exercise 3.26
+; To search a table as implemented above, one needs to scan through the list of
+; records.  This is basically the unordered list representation of section 2.3.3.  For
+; large tables, it may be more efficient to structure the table in a different manner.
+; Describe a table implementation where the (key, value) records are organized
+; using a binary tree, assuming that keys can be ordered in some way (e.g., nu-
+; merically or alphabetically).  (Compare exercise 2.66 of chapter 2.)
+
+================================================================================
+flamingo  Solution is 56 lines with needed shim procedures.
+
+API here is different.  Instead of 'lookup' returning the value inserted,
+it returns the key/value pair.  This is interesting -- this approach
+could be used as a way to determine if a given table location is "defined"
+(a perl term).  To quote perl, "The undefined version is the value that
+indicates that there is no real value for something."  This approach 
+permits #f to be a value inserted because a "defined" #f can be distinguished
+from the undefined #f of a unsuccessful lookup.
+
+    antix21:~/src/scheme/solutions2 % s9
+    Scheme 9 from Empty Space (Reimagined)
+    > (load "flam")
+    > (define t1 (make-table))
+    > (insert! t1 41 #f)
+    > (lookup t1 41)
+    (41 . #f)
+    > (lookup t1 666)
+    #f
+
+With the appropriate shim procedure, flamingo passes the integer key
+torture test.
+
+The code scans the tree twice for insert.  Once at lookup, and once
+at adjoin-set, thus not an efficient algorithm.
+
+================================================================================
+gws     Solution is 70 lines with needed shim procedures.
+
+Fails integer key torture test.  Observe:
+
+     antix21:~/src/scheme/solutions2 % s9
+     Scheme 9 from Empty Space (Reimagined)
+     > (define nil '())  (define false #f)
+     > > (load "gws.pure")
+     > (put (list 136 438) list)  <== note what was inserted
+     ok
+     > (put (list 136 254) 'waitforit)
+     ok
+     > (get (list 136 438))
+     #f                      <== value "put" into the table was lost!
+
+================================================================================
+sam  Multiple problems.  Not even valid syntax.
+
+    (set right (adjoin-set x right))))))    ; presume should be set!
+
+    (let (left (left-branch set))   ; correct syntax is (let ((left...
+
+================================================================================
+gp    Solution is 56 lines with needed shim.
+
+Passes the integer key torture test.
+
+BUT...
+
+The procedure make-tree is not called once per insertion (to construct
+the new key/value pair) but is instead called multiple times, proportional
+to the depth (or height) of the tree.
+
+Observation: 
+
+Procedure make-tree is a constructor.  It creates a new 3-element list
+every time it is called.  Normally, when a key/value pair is inserted,
+a single new tree node is created (the exception is replacing the value
+at a previously established key, then no new node needs to be created.)
+But, in the gp implementation, make-tree is called **multiple** times per
+single insertion, proportional to the depth (or height) of the tree.
+I suspected this from inspection, and I confirmed with instrumentation
+at make-tree:
+
+	   antix21:~/src/scheme/solutions2 % s9
+	   Scheme 9 from Empty Space (Reimagined)
+	   > (load "gp")
+	   >  (define t1 (make-table))
+	   > (insert! t1 1 'a)
+	   "make-tree " 1
+	   > (insert! t1 2 'b)
+	   "make-tree " 2
+	   "make-tree " 3
+	   > (insert! t1 3 'c)
+	   "make-tree " 4
+	   "make-tree " 5
+	   "make-tree " 6
+	   > (insert! t1 4 'd)
+	   "make-tree " 7
+	   "make-tree " 8
+	   "make-tree " 9
+	   "make-tree " 10
+
+This hits the allocator & garbage collector extra hard, and thus
+slows the implementation.
+
+================================================================================
+joe w     Solution is 85 lines with needed shim procedure.
+
+The torture test found subtle trouble upon two insertions:
+
+    antix21:~/src/scheme/solutions2 % diff joe.pure joe
+    1d0
+    <  #lang sicp
+    78a78
+    >  (define make-table new-table)
+    antix21:~/src/scheme/solutions2 % racket -i -p neil/sicp
+    Welcome to Racket v7.9 [bc].
+    > (load "joe")
+    > (define t1 (make-table))
+    > (insert! t1 (list 379) '(1 . 2))
+    'ok
+    > (insert! t1 (list 379 666) 1.618)
+    ; mcar: contract violation
+    ;   expected: mpair?
+    ;   given: 1
+    ; [,bt for context]
+
+Also, the code has equal? v. eq? asymmetry:
+
+        ((equal? (car keys) (caar records))  <== equal? used here, but...
+          ((eq? new-key (caar set))          <== eq? used here
+
+The joe implementation requires the key(s) to be presented as a list.
+So a special version of bttest had to be made, called joetest.
+
+================================================================================
+x3v     Solution is 49 lines with needed shim procedure.
+
+Passes the integer key torture test*.  Tight code at only 49 lines.
+
+I note "eq? key" is used in lookup but "= key" is used in insert.  I don't
+understand this asymmetry.  To quote, "On numbers and characters, eq?'s
+behavior is implementation-dependent."  A difference like this begs for
+a comment explaining why different comparators are being used.
+
+* Interestingly, this = v. eq? asymmetry taught me something: in s9,
+(eq? 7 7) is #f, whereas in mit-scheme and racket, it is #t.  The x3v
+code fails the torture test when interpreted using s9, but passes using
+either mit-scheme or racket.
+
+In sum, I'm left wondering if this difference is intentional or an
+oversight.  Sans an enlightening comment, I'm thinking the later...
+
+================================================================================
+roy-tobin     Solution is 46 lines.
+
+Passes the integer key torture test.
+
+What I like about this solution:
+
+  Maximum utility, as the user gets to choose the compare function.
+  I tested with numbers (positive integers & decimals) and strings.
+
+  The use of small, easily understood procedures with shallow indenting
+  and no local procedure definitions.
+
+  Sound abstraction as demonstrated by all the gritty cars & cdrs being
+  contained in the auxiliary procedures in the top half.  No car/cdr
+  details in the bottom half.
+
+  Insert does not scan the tree twice as some solutions do.
+
+  At 40 lines (sans blank lines) or 46 lines (as presented) it is the
+  tightest solution so far.
+
+  Thought was given to the speed of access of a node's most frequently
+  accessed member: the key.  The key is available as the car of a
+  node, the fastest access possible (x3v makes this choice, too).
+  Other solutions use caar.  The thinking is that going to a binary tree
+  data structure means that performance is to be considered.
+
+What I don't like:
+
+  No thought was given to the return value of insert!.  Should be 'ok
+  or more usefully the value successfully inserted.
+
+  The order of terms in the compare expression of the key to the
+  node's key is just weird.  After reading others' solutions, I find
+  the reversed ordering of terms is more literate.
+
+March 2023
