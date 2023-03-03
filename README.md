@@ -6,6 +6,7 @@ implementation of a table data structure of key/value pairs implemented
 using a binary tree.
 
 > Exercise 3.26 SICP[^1] 1st & 2nd Ed
+>
 > To search a table as implemented above, one needs to scan through the list of
 > records.  This is basically the unordered list representation of section 2.3.3.  For
 > large tables, it may be more efficient to structure the table in a different manner.
